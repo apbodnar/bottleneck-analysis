@@ -1,0 +1,56 @@
+{
+    "correlations": [
+        {
+            "name": "Texture LoD mismanagement",
+            "counters": [
+                {
+                    "id": "41",
+                    "threshold": 0.5
+                },
+                {
+                    "id": "42",
+                    "threshold": 0.4
+                },
+                {
+                    "id": "43",
+                    "threshold": 0.1
+                }
+            ],
+            "has_slice": "fragment"
+        },
+        {
+            "name": "Vertex overdraw",
+            "counters": [
+                {
+                    "id": "41",
+                    "threshold": 0.5
+                },
+                {
+                    "id": "42",
+                    "threshold": 0.5
+                },
+                {
+                    "id": "43",
+                    "threshold": 0.5
+                }
+            ]
+        },
+        {
+            "name": "Fragment overdraw",
+            "counters": [
+                {
+                    "id": "41",
+                    "threshold": 0.5
+                },
+                {
+                    "id": "42",
+                    "threshold": 0.5
+                },
+                {
+                    "id": "43",
+                    "threshold": 0.5
+                }
+            ]
+        }
+    ]
+}
