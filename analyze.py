@@ -1,3 +1,4 @@
+from tempfile import NamedTemporaryFile
 import json
 import math
 import sys
@@ -7,32 +8,52 @@ sys.path.append('./perfetto/src/trace_processor/python')
 
 from trace_processor.api import TraceProcessor
 
-from tempfile import NamedTemporaryFile
-
 def load_spec(name):
     with open(name, 'r') as fp:
         return json.load(fp)
 
+
 def build_query(correlation):
-    return ""
+    counters = correlation['counters']
+    slice_names = correlation.get('has_slice')
+    track_name_sql = ' OR '.join(
+        map(lambda d: "t.name='{}'".format(d['name']), counters))
+    slice_name_ts_sql = ""
+    slice_table_sql = ""
+    threshold_sql = ""
+    if slice_names:
+        slice_table_sql = ", gpu_slice s"
+        slice_names_sql = ' OR '.join(
+            map(lambda s: f"s.name='{s}'", slice_names))
+        slice_name_ts_sql += f"AND ({slice_names_sql}) AND c.ts>=s.ts AND c.ts<(s.ts+s.dur)"
+    threshold_sql = ' AND '.join(
+        map(lambda counter: f"c.value{counter['comparator']}{counter['threshold']}'", counters))
+    return f"SELECT t.name, c.value, c.ts FROM " \
+        f"(counter c join counter_track t on c.track_id=t.id) {slice_table_sql} "\
+        f"WHERE t.type='gpu_counter_track' AND ({track_name_sql}) {slice_name_ts_sql} " \
+        f"AND {threshold_sql}" \
+        f"ORDER BY c.ts"
+
 
 def flatten_slices(slices):
     flattened = [slices[0]]
     for slice in slices[1:]:
         if slice['ts'] < flattened[-1]['ts'] + flattened[-1]['dur']:
-            flattened[-1]['dur'] = max(slice['ts'] - flattened[-1]['ts'] + slice['dur'], flattened[-1]['dur'])
+            flattened[-1]['dur'] = max(slice['ts'] - flattened[-1]
+                                       ['ts'] + slice['dur'], flattened[-1]['dur'])
         else:
             flattened.append(slice)
 
     return flattened
 
+
 def get_frame_time_stats(tp, package_name, api):
     # Find the frame interval
     stats = {'busy_sum_frametimes': {}, 'busy_span_frametimes': {}}
-    QUEUE_QUERY = "SELECT s.name, s.ts, s.dur, g.submission_id FROM slices s \
-        LEFT JOIN gpu_slice g ON g.name=s.name AND s.ts=g.ts AND s.dur=g.dur \
-        WHERE s.name='vkQueuePresentKHR' or (g.submission_id IS NOT NULL and g.name='vkQueueSubmit') \
-        ORDER BY s.ts"
+    QUEUE_QUERY = "SELECT s.name, s.ts, s.dur, g.submission_id FROM slices s " \
+        "LEFT JOIN gpu_slice g ON g.name=s.name AND s.ts=g.ts AND s.dur=g.dur " \
+        "WHERE s.name='vkQueuePresentKHR' or (g.submission_id IS NOT NULL and g.name='vkQueueSubmit') " \
+        "ORDER BY s.ts"
     GPU_SLICE_QUERY = "SELECT * FROM gpu_slice WHERE name!='vkQueueSubmit' and submission_id IS NOT NULL ORDER BY ts"
     busy_sum = 0
     busy_span_sum = 0
@@ -45,14 +66,15 @@ def get_frame_time_stats(tp, package_name, api):
         slices_query_it = tp.query(GPU_SLICE_QUERY)
         for slice_row in slices_query_it:
             if slice_row.submission_id not in submission_slices:
-                submission_slices[slice_row.submission_id] = [{'ts': slice_row.ts, 'dur': slice_row.dur}]
+                submission_slices[slice_row.submission_id] = [
+                    {'ts': slice_row.ts, 'dur': slice_row.dur}]
             else:
-                submission_slices[slice_row.submission_id].append({'ts': slice_row.ts, 'dur': slice_row.dur})
+                submission_slices[slice_row.submission_id].append(
+                    {'ts': slice_row.ts, 'dur': slice_row.dur})
         # find all vkQueuePresent calls, and all vkQueueSubmit call between them
         # iterate frame intervals
         queue_query_it = tp.query(QUEUE_QUERY)
         for queue_row in queue_query_it:
-            print(queue_row.name)
             if queue_row.name == 'vkQueuePresentKHR':
                 intervals.append([])
             if len(intervals) > 0 and queue_row.submission_id in submission_slices and queue_row.name != 'vkQueuePresentKHR':
@@ -67,7 +89,8 @@ def get_frame_time_stats(tp, package_name, api):
                 range_min = math.inf
                 # iterate submissions
                 for gpu_slice in interval:
-                    range_max = max(range_max, gpu_slice['ts'] + gpu_slice['dur'])
+                    range_max = max(
+                        range_max, gpu_slice['ts'] + gpu_slice['dur'])
                     range_min = min(range_min, gpu_slice['ts'])
                 span_time = range_max - range_min
                 key = int(active_time / 1000000)
@@ -82,14 +105,14 @@ def get_frame_time_stats(tp, package_name, api):
                     stats['busy_span_frametimes'][key] += 1
 
     elif api == "GL":
-        # this own't work until we have more actionable submission info from vendors
+        # this won't work until we have more actionable submission info from vendors
         # interval_query = "SELECT * FROM slices WHERE name LIKE 'eglSwapBuffers'"
         pass
     else:
         raise ValueError("Bad api")
 
     # Compute the median
-    keys = sorted(stats['busy_sum_frametimes']) 
+    keys = sorted(stats['busy_sum_frametimes'])
     median = 0
     for key in keys:
         median += stats['busy_sum_frametimes'][key]
@@ -97,7 +120,7 @@ def get_frame_time_stats(tp, package_name, api):
             stats['busy_sum_median'] = key
             break
 
-    keys = sorted(stats['busy_span_frametimes']) 
+    keys = sorted(stats['busy_span_frametimes'])
     median = 0
     for key in keys:
         median += stats['busy_span_frametimes'][key]
@@ -108,18 +131,22 @@ def get_frame_time_stats(tp, package_name, api):
     # stats['mean'] = (sum / count) / 1000000
     return stats
 
+
 def analyze_query(query_result):
     pass
 
+
 def analyze_trace(tp, spec, package_name, api):
-    hists = get_frame_time_stats(tp, package_name, api)
-    pprint.pprint(hists)
-    # cors = spec['correlations']
-    # for cor in cors:
-    #     query_str = build_query(cor)
-    #     qr_it = tp.query(query_str)
-    #     for row in qr_it:
-    #         pprint.pprint(dir(row))
+    # hists = get_frame_time_stats(tp, package_name, api)
+    # pprint.pprint(hists)
+    cors = spec['correlations']
+    for cor in cors:
+        query_str = build_query(cor)
+        print(query_str, "\n")
+        # qr_it = tp.query(query_str)
+        # for row in qr_it:
+        #     pprint.pprint(dir(row))
+
 
 if __name__ == '__main__':
     if len(sys.argv) == 5:

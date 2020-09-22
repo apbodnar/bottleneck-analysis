@@ -4,52 +4,35 @@
             "name": "Texture LoD mismanagement",
             "counters": [
                 {
-                    "id": "41",
-                    "threshold": 0.5
+                    "id": 41,
+                    "name": "Texture samples",
+                    "threshold": 1000000,
+                    "comparator": ">"
                 },
                 {
-                    "id": "42",
-                    "threshold": 0.4
-                },
-                {
-                    "id": "43",
-                    "threshold": 0.1
+                    "id": 42,
+                    "name": "Texture bytes read from L2 per texture cycle",
+                    "threshold": 5,
+                    "comparator": "<"
                 }
             ],
-            "has_slice": "fragment"
-        },
-        {
-            "name": "Vertex overdraw",
-            "counters": [
+            "compounds": [
                 {
-                    "id": "41",
-                    "threshold": 0.5
-                },
-                {
-                    "id": "42",
-                    "threshold": 0.5
-                },
-                {
-                    "id": "43",
-                    "threshold": 0.5
+                    "name": "Texture bytes per pixel",
+                    "formula": [
+                        "*",
+                        "*",
+                        42,
+                        41,
+                        43
+                    ],
+                    "threshold": 0.5,
+                    "comparator": ">="
                 }
-            ]
-        },
-        {
-            "name": "Fragment overdraw",
-            "counters": [
-                {
-                    "id": "41",
-                    "threshold": 0.5
-                },
-                {
-                    "id": "42",
-                    "threshold": 0.5
-                },
-                {
-                    "id": "43",
-                    "threshold": 0.5
-                }
+            ],
+            "has_slice": [
+                "fragment",
+                "vertex"
             ]
         }
     ]
