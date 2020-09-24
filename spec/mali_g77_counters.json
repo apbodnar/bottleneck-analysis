@@ -4,16 +4,19 @@
             "name": "Texture LoD mismanagement",
             "counters": [
                 {
-                    "id": 41,
                     "name": "Texture samples",
-                    "threshold": 1000000,
+                    "threshold": 10000000,
                     "comparator": ">"
                 },
                 {
-                    "id": 42,
-                    "name": "Texture bytes read from L2 per texture cycle",
-                    "threshold": 5,
-                    "comparator": "<"
+                    "name": "Texture read bytes from external memory",
+                    "threshold": 500000000,
+                    "comparator": ">"
+                },
+                {
+                    "name": "Texture filtering cycles",
+                    "threshold": 10000000,
+                    "comparator": ">"
                 }
             ],
             "compounds": [
@@ -31,8 +34,7 @@
                 }
             ],
             "has_slice": [
-                "fragment",
-                "vertex"
+                "fragment"
             ]
         }
     ]

@@ -16,22 +16,18 @@ def load_spec(name):
 def build_query(correlation):
     counters = correlation['counters']
     slice_names = correlation.get('has_slice')
-    track_name_sql = ' OR '.join(
-        map(lambda d: "t.name='{}'".format(d['name']), counters))
+    track_name_treshold_sql = ' OR '.join(
+        map(lambda counter: f"(t.name='{counter['name']}' AND c.value{counter['comparator']}{counter['threshold']})", counters))
     slice_name_ts_sql = ""
     slice_table_sql = ""
-    threshold_sql = ""
     if slice_names:
-        slice_table_sql = ", gpu_slice s"
+        slice_table_sql = "  LEFT JOIN gpu_slice s on c.ts>=s.ts AND c.ts<(s.ts+s.dur)"
         slice_names_sql = ' OR '.join(
             map(lambda s: f"s.name='{s}'", slice_names))
-        slice_name_ts_sql += f"AND ({slice_names_sql}) AND c.ts>=s.ts AND c.ts<(s.ts+s.dur)"
-    threshold_sql = ' AND '.join(
-        map(lambda counter: f"c.value{counter['comparator']}{counter['threshold']}'", counters))
-    return f"SELECT t.name, c.value, c.ts FROM " \
-        f"(counter c join counter_track t on c.track_id=t.id) {slice_table_sql} "\
-        f"WHERE t.type='gpu_counter_track' AND ({track_name_sql}) {slice_name_ts_sql} " \
-        f"AND {threshold_sql}" \
+        slice_name_ts_sql += f"AND ({slice_names_sql})"
+    return f"SELECT t.name, c.value, c.ts, s.submission_id FROM " \
+        f"(counter c LEFT JOIN counter_track t ON c.track_id=t.id){slice_table_sql} "\
+        f"WHERE t.type='gpu_counter_track' AND ({track_name_treshold_sql}) {slice_name_ts_sql} " \
         f"ORDER BY c.ts"
 
 
@@ -59,6 +55,7 @@ def get_frame_time_stats(tp, package_name, api):
     busy_span_sum = 0
     count = 0
     intervals = []
+    frame_numbers = {}
     submission_slices = {}
     submit_slices = []
     if api == "Vulkan":
@@ -79,6 +76,7 @@ def get_frame_time_stats(tp, package_name, api):
                 intervals.append([])
             if len(intervals) > 0 and queue_row.submission_id in submission_slices and queue_row.name != 'vkQueuePresentKHR':
                 intervals[-1] += submission_slices[queue_row.submission_id]
+                frame_numbers[queue_row.submission_id] = len(intervals)
 
         for interval in intervals:
             if len(interval) > 0:
@@ -129,23 +127,44 @@ def get_frame_time_stats(tp, package_name, api):
             break
 
     # stats['mean'] = (sum / count) / 1000000
-    return stats
+    return stats, frame_numbers
 
 
-def analyze_query(query_result):
-    pass
+def analyze_query(query_it, correlation, frame_numbers):
+    counters = correlation['counters']
+    groups = {}
+    frames = []
+    ts = -1
+    current = {}
+    for row in query_it:
+        if row.ts != ts:
+            if len(current) == len(counters):
+                if not row.submission_id in current:
+                    current['submission_id'] = row.submission_id
+                groups[ts] = current
+                frame_number = frame_numbers[current['submission_id']]
+                key = f"{frame_number}({current['submission_id']})"
+                if len(frames) == 0 or (len(frames) > 0 and frames[-1] != key):
+                    frames.append(key)
+            ts = row.ts
+            current = {}
+        current[row.name] = row.value
+    if len(current) == len(counters):
+        groups[ts] = current
+
+    print(
+        f"Bottleneck for rule: {correlation['name']} found in frames: {frames}")
 
 
 def analyze_trace(tp, spec, package_name, api):
-    # hists = get_frame_time_stats(tp, package_name, api)
-    # pprint.pprint(hists)
+    stats, frame_numbers = get_frame_time_stats(tp, package_name, api)
+    pprint.pprint(stats)
     cors = spec['correlations']
     for cor in cors:
         query_str = build_query(cor)
-        print(query_str, "\n")
-        # qr_it = tp.query(query_str)
-        # for row in qr_it:
-        #     pprint.pprint(dir(row))
+        print(query_str)
+        qr_it = tp.query(query_str)
+        analyze_query(qr_it, cor, frame_numbers)
 
 
 if __name__ == '__main__':
